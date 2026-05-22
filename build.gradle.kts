@@ -1,28 +1,34 @@
 plugins {
-    kotlin("jvm") version "1.9.24"
+    kotlin("jvm") version "1.9.0"
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
+group = "com.battleship"
+version = "1.0.0"
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    // Kotlin
     implementation(kotlin("stdlib"))
 
-    // JUnit 5
-    testImplementation(platform("org.junit:junit-bom:5.10.2"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
 }
 
 kotlin {
     jvmToolchain(17)
+}
+
+// Для запуска через gradle run
+tasks.register<JavaExec>("run") {
+    mainClass.set("MainKt")
+    classpath = sourceSets["main"].runtimeClasspath
 }
