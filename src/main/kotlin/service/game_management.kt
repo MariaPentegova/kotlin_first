@@ -1,19 +1,27 @@
-package service
+ackage service
 
 import models.*
 
 class GameManager(
     private val validator: BoardValidator,
     private val battleService: BattleService,
-    private val boardFactory: BoardFactory  // Здесь всё правильно
+    private val boardFactory: BoardFactory,
+    private val registry: PlayerRegistry = PlayerRegistry()// Здесь всё правильно
 )  {
     private var nextPlayerId = 1
     private val players = mutableMapOf<Int, Player>()
     private var currentGame: GameState? = null
 
+    init {
+        // Загружаем игроков из реестра при старте
+        registry.getAll().forEach { players[it.id] = it }
+        nextPlayerId = (players.keys.maxOrNull() ?: 0) + 1
+    }
+
     fun addPlayer(name: String): Player {
         val player = Player(nextPlayerId, name.trim())
         players[nextPlayerId] = player
+        registry.save(player)  // ← сохраняем в реестр
         nextPlayerId++
         return player
     }
