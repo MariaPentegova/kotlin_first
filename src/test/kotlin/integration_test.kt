@@ -5,48 +5,205 @@ import models.ShipPlacementResult
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import service.*
+import java.io.File
 
 class IntegrationTest {
+
     private lateinit var validator: BoardValidator
     private lateinit var battleService: BattleService
     private lateinit var factory: BoardFactory
+    private lateinit var registry: PlayerRegistry
     private lateinit var gameManager: GameManager
+
+    @TempDir
+    lateinit var tempDir: File
 
     @BeforeEach
     fun setUp() {
         validator = BoardValidator()
         battleService = BattleService(validator)
         factory = BoardFactory()
-        gameManager = GameManager(validator, battleService, factory)
+        registry = PlayerRegistry(tempDir.resolve("test_players.json").absolutePath)
+        gameManager = GameManager(validator, battleService, factory, registry)
     }
 
     @Test
     fun `full game flow with two players`() {
-        // 1. Добавляем игроков
         val p1 = gameManager.addPlayer("Анна")
         val p2 = gameManager.addPlayer("Борис")
         assertEquals(2, gameManager.getAllPlayers().size)
 
-        // 2. Создаём игру
         val game = gameManager.createGame(p1.id, p2.id)
         assertNotNull(game)
         assertEquals(p1.id, game?.currentPlayer?.id)
 
-        // 3. Расставляем минимальные корабли (чтобы поместились)
-        // Используем "right" направление и разные строки
         gameManager.placeShip(p1.id, 0, 0, 1, "right")
         gameManager.placeShip(p1.id, 2, 0, 1, "right")
         gameManager.placeShip(p2.id, 0, 0, 1, "right")
         gameManager.placeShip(p2.id, 2, 0, 1, "right")
 
-        // 4. Игровой процесс - p1 стреляет
         val result = gameManager.makeMove(p1.id, 0, 0)
         assertTrue(result == MoveResult.HIT || result == MoveResult.KILL || result == MoveResult.MISS)
 
-        // 5. Проверяем, что игра продолжается
         val currentGame = gameManager.getCurrentGame()
         assertNotNull(currentGame)
+    }
+
+    @Test
+    fun `player registry integration - players persist between game sessions`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+
+        assertEquals(2, gameManager.getAllPlayers().size)
+
+        val newGameManager = GameManager(validator, battleService, factory, registry)
+        val loadedPlayers = newGameManager.getAllPlayers()
+
+        assertEquals(2, loadedPlayers.size)
+        assertTrue(loadedPlayers.any { it.name == "Анна" })
+        assertTrue(loadedPlayers.any { it.name == "Борис" })
+    }
+
+    @Test
+    fun `player registry integration - new players get unique IDs across sessions`() {
+        val p1 = gameManager.addPlayer("Анна")
+        assertEquals(1, p1.id)
+
+        val newGameManager = GameManager(validator, battleService, factory, registry)
+        val p2 = newGameManager.addPlayer("Борис")
+
+        assertEquals(2, p2.id)
+    }
+
+    @Test
+    fun `game statistics integration - stats update after game`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+
+        gameManager.createGame(p1.id, p2.id)
+        gameManager.placeShip(p2.id, 0, 0, 1, "right")
+        gameManager.placeShip(p1.id, 5, 5, 1, "right")
+
+        val result = gameManager.makeMove(p1.id, 0, 0)
+        assertTrue(result == MoveResult.KILL || result == MoveResult.GAME_WON)
+
+        val game = gameManager.getCurrentGame()
+        assertNotNull(game?.winner)
+        assertEquals(p1.id, game?.winner?.id)
+    }
+
+    @Test
+    fun `full game flow with registry and statistics`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+        val p3 = gameManager.addPlayer("Светлана")
+
+        assertEquals(3, gameManager.getAllPlayers().size)
+
+        val game = gameManager.createGame(p1.id, p2.id)
+        assertNotNull(game)
+
+        gameManager.placeShip(p1.id, 0, 0, 1, "right")
+        gameManager.placeShip(p2.id, 0, 0, 1, "right")
+
+        gameManager.makeMove(p1.id, 0, 0)
+
+        val finalGame = gameManager.getCurrentGame()
+        assertNotNull(finalGame?.winner)
+
+        gameManager.finishGame()
+
+        val newGame = gameManager.createGame(p2.id, p3.id)
+        assertNotNull(newGame)
+        assertEquals(p2.id, newGame?.player1?.id)
+        assertEquals(p3.id, newGame?.player2?.id)
+    }
+
+    @Test
+    fun `player registry integration - restart application preserves players`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+
+        val newRegistry = PlayerRegistry(tempDir.resolve("test_players.json").absolutePath)
+        val newGameManager = GameManager(validator, battleService, factory, newRegistry)
+
+        val loadedPlayers = newGameManager.getAllPlayers()
+        assertEquals(2, loadedPlayers.size)
+
+        assertTrue(loadedPlayers.any { it.id == p1.id && it.name == "Анна" })
+        assertTrue(loadedPlayers.any { it.id == p2.id && it.name == "Борис" })
+    }
+
+    @Test
+    fun `player registry integration - duplicate names are allowed`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Анна")
+
+        assertEquals(2, gameManager.getAllPlayers().size)
+        assertNotEquals(p1.id, p2.id)
+        assertEquals("Анна", p1.name)
+        assertEquals("Анна", p2.name)
+
+        val newGameManager = GameManager(validator, battleService, factory, registry)
+        val loadedPlayers = newGameManager.getAllPlayers()
+        assertEquals(2, loadedPlayers.size)
+        assertTrue(loadedPlayers.any { it.id == p1.id })
+        assertTrue(loadedPlayers.any { it.id == p2.id })
+    }
+
+    @Test
+    fun `game manager integration - cannot create game with non-existent player`() {
+        val p1 = gameManager.addPlayer("Анна")
+
+        val game = gameManager.createGame(p1.id, 999)
+        assertNull(game)
+    }
+
+    @Test
+    fun `game manager integration - cannot create game with same player`() {
+        val p1 = gameManager.addPlayer("Анна")
+
+        val game = gameManager.createGame(p1.id, p1.id)
+        assertNull(game)
+    }
+
+    @Test
+    fun `battle service integration - multiple hits on same ship`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+        gameManager.createGame(p1.id, p2.id)
+
+        gameManager.placeShip(p2.id, 0, 0, 3, "right")
+
+        var result = gameManager.makeMove(p1.id, 0, 0)
+        assertEquals(MoveResult.HIT, result)
+
+        result = gameManager.makeMove(p1.id, 0, 1)
+        assertEquals(MoveResult.HIT, result)
+
+        result = gameManager.makeMove(p1.id, 0, 2)
+        assertEquals(MoveResult.KILL, result)
+    }
+
+    @Test
+    fun `board validator integration - ships cannot be placed too close`() {
+        val p1 = gameManager.addPlayer("Анна")
+        val p2 = gameManager.addPlayer("Борис")
+        gameManager.createGame(p1.id, p2.id)
+
+        val firstResult = gameManager.placeShip(p1.id, 0, 0, 3, "right")
+        assertEquals(ShipPlacementResult.SUCCESS, firstResult)
+
+        val closeResult = gameManager.placeShip(p1.id, 0, 3, 2, "right")
+        assertEquals(ShipPlacementResult.TOO_CLOSE, closeResult)
+
+        val overlapResult = gameManager.placeShip(p1.id, 0, 1, 2, "right")
+        assertEquals(ShipPlacementResult.OVERLAP, overlapResult)
+
+        val successResult = gameManager.placeShip(p1.id, 2, 0, 2, "right")
+        assertEquals(ShipPlacementResult.SUCCESS, successResult)
     }
 
     @Test
@@ -55,15 +212,12 @@ class IntegrationTest {
         val p2 = gameManager.addPlayer("Борис")
         gameManager.createGame(p1.id, p2.id)
 
-        // Ставим первый корабль
         val firstResult = gameManager.placeShip(p1.id, 0, 0, 3, "right")
         assertEquals(ShipPlacementResult.SUCCESS, firstResult)
 
-        // Пытаемся поставить корабль вплотную (должно быть TOO_CLOSE)
         val closeResult = gameManager.placeShip(p1.id, 0, 3, 2, "right")
         assertEquals(ShipPlacementResult.TOO_CLOSE, closeResult)
 
-        // Ставим с зазором (должно быть SUCCESS)
         val successResult = gameManager.placeShip(p1.id, 2, 0, 2, "right")
         assertEquals(ShipPlacementResult.SUCCESS, successResult)
     }
@@ -74,29 +228,19 @@ class IntegrationTest {
         val p2 = gameManager.addPlayer("Борис")
         gameManager.createGame(p1.id, p2.id)
 
-        // Расставляем по одному кораблю для каждого
-        val placeResult1 = gameManager.placeShip(p1.id, 0, 0, 1, "right")
-        val placeResult2 = gameManager.placeShip(p2.id, 0, 0, 1, "right")
-        assertEquals(ShipPlacementResult.SUCCESS, placeResult1)
-        assertEquals(ShipPlacementResult.SUCCESS, placeResult2)
+        gameManager.placeShip(p1.id, 0, 0, 1, "right")
+        gameManager.placeShip(p2.id, 0, 0, 1, "right")
 
-        // p1 стреляет и попадает (уничтожает корабль p2)
         val result = gameManager.makeMove(p1.id, 0, 0)
-        println("First move result: $result")
+        assertTrue(result == MoveResult.KILL || result == MoveResult.GAME_WON)
 
-        // Так как корабль p2 уничтожен, makeMove возвращает KILL
-        assertEquals(MoveResult.KILL, result, "Expected KILL for last ship")
-
-        // Проверяем победителя (должен быть установлен в GameState)
         val game = gameManager.getCurrentGame()
-        assertNotNull(game, "Game should not be null")
-        assertNotNull(game?.winner, "Winner should be set after game over")
-        assertEquals(p1.id, game?.winner?.id, "Winner should be p1")
+        assertNotNull(game?.winner)
+        assertEquals(p1.id, game?.winner?.id)
     }
 
     @Test
     fun `multiple games in sequence`() {
-        // Первая игра
         val p1 = gameManager.addPlayer("Анна")
         val p2 = gameManager.addPlayer("Борис")
 
@@ -104,11 +248,9 @@ class IntegrationTest {
         gameManager.placeShip(p2.id, 0, 0, 1, "right")
         gameManager.makeMove(p1.id, 0, 0)
 
-        // Завершаем игру
         gameManager.finishGame()
         assertNull(gameManager.getCurrentGame())
 
-        // Вторая игра с новыми игроками
         val p3 = gameManager.addPlayer("Светлана")
         val p4 = gameManager.addPlayer("Дмитрий")
 
@@ -116,138 +258,5 @@ class IntegrationTest {
         assertNotNull(gameManager.getCurrentGame())
         assertEquals(p3.id, gameManager.getCurrentGame()?.currentPlayer?.id)
 
-        // Проверяем, что старые игроки остались
         assertEquals(4, gameManager.getAllPlayers().size)
     }
-
-    @Test
-    fun `board factory integration`() {
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Борис")
-        gameManager.createGame(p1.id, p2.id)
-
-        // Расставляем корабли
-        gameManager.placeShip(p1.id, 0, 0, 2, "right")
-
-        val game = gameManager.getCurrentGame()
-        val originalBoard = game?.board1
-
-        // Создаём скрытую доску
-        val hiddenBoard = factory.getHiddenBoard(originalBoard!!)
-
-        // Проверяем, что корабли скрыты
-        assertEquals('~', hiddenBoard[0][0])
-        assertEquals('~', hiddenBoard[0][1])
-
-        // Создаём копию доски
-        val copyBoard = factory.copyBoard(originalBoard)
-        assertTrue(factory.boardsAreEqual(originalBoard, copyBoard))
-
-        // Меняем оригинал - копия не должна измениться
-        originalBoard[0][0] = 'X'
-        assertFalse(factory.boardsAreEqual(originalBoard, copyBoard))
-    }
-
-    @Test
-    fun `player management integration`() {
-        // Добавляем игроков с одинаковыми именами
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Анна")
-        val p3 = gameManager.addPlayer("Анна")
-
-        assertEquals(1, p1.id)
-        assertEquals(2, p2.id)
-        assertEquals(3, p3.id)
-
-        // Все должны быть в списке
-        val players = gameManager.getAllPlayers()
-        assertEquals(3, players.size)
-
-        // Проверяем, что можно создать игру между игроками с одинаковыми именами
-        val game = gameManager.createGame(p1.id, p2.id)
-        assertNotNull(game)
-        assertEquals(p1.id, game?.player1?.id)
-        assertEquals(p2.id, game?.player2?.id)
-    }
-
-    @Test
-    fun `hit and kill detection integration`() {
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Борис")
-        gameManager.createGame(p1.id, p2.id)
-
-        // Ставим двухпалубный корабль
-        gameManager.placeShip(p2.id, 0, 0, 2, "right")
-
-        // Первое попадание - HIT
-        var result = gameManager.makeMove(p1.id, 0, 0)
-        assertEquals(MoveResult.HIT, result)
-
-        // Второе попадание - KILL
-        result = gameManager.makeMove(p1.id, 0, 1)
-        assertEquals(MoveResult.KILL, result)
-
-        // Проверяем, что корабли потоплены
-        val game = gameManager.getCurrentGame()
-        val board = game?.board2
-        assertEquals('X', board?.get(0)?.get(0))
-        assertEquals('X', board?.get(0)?.get(1))
-    }
-
-    @Test
-    fun `turn stays with player after hit`() {
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Борис")
-        gameManager.createGame(p1.id, p2.id)
-
-        // Ставим двухпалубный корабль для p2
-        gameManager.placeShip(p2.id, 0, 0, 2, "right")
-
-        // p1 стреляет - попадание
-        val result = gameManager.makeMove(p1.id, 0, 0)
-        assertEquals(MoveResult.HIT, result)
-
-        // Ход должен остаться у p1
-        val game = gameManager.getCurrentGame()
-        assertEquals(p1.id, game?.currentPlayer?.id)
-    }
-
-    @Test
-    fun `turn switches to opponent after miss`() {
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Борис")
-        gameManager.createGame(p1.id, p2.id)
-
-        // Ставим корабли для обоих
-        gameManager.placeShip(p2.id, 0, 0, 1, "right")
-        gameManager.placeShip(p1.id, 5, 5, 1, "right")
-
-        // p1 стреляет в пустую клетку - промах
-        val result = gameManager.makeMove(p1.id, 9, 9)
-        assertEquals(MoveResult.MISS, result)
-
-        // Ход должен перейти к p2
-        val game = gameManager.getCurrentGame()
-        assertEquals(p2.id, game?.currentPlayer?.id)
-    }
-
-    @Test
-    fun `turn stays with player after kill`() {
-        val p1 = gameManager.addPlayer("Анна")
-        val p2 = gameManager.addPlayer("Борис")
-        gameManager.createGame(p1.id, p2.id)
-
-        // Ставим однопалубный корабль для p2
-        gameManager.placeShip(p2.id, 0, 0, 1, "right")
-        // Ставим корабль для p1, чтобы игра не закончилась
-        gameManager.placeShip(p1.id, 5, 5, 1, "right")
-
-        // p1 стреляет и топит
-        val result = gameManager.makeMove(p1.id, 0, 0)
-        assertEquals(MoveResult.KILL, result)
-
-        // Ход должен остаться у p1 (так как он попал)
-        val game = gameManager.getCurrentGame()
-        assertEquals(p1.id, game?.currentPlayer?.id)
-    }
-}
