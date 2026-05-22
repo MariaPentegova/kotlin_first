@@ -15,14 +15,18 @@ class SystemTest {
     private lateinit var validator: BoardValidator
     private lateinit var battleService: BattleService
     private lateinit var factory: BoardFactory
+    private lateinit var registry: PlayerRegistry  // ← ДОБАВИТЬ ЭТУ СТРОКУ
     private lateinit var gameManager: GameManager
 
     @BeforeEach
     fun setUp() {
+        registry = PlayerRegistry("test_players_temp.json")
+        registry.clear()
+
         validator = BoardValidator()
         battleService = BattleService(validator)
         factory = BoardFactory()
-        gameManager = GameManager(validator, battleService, factory)
+        gameManager = GameManager(validator, battleService, factory, registry)
     }
 
     @Test
@@ -60,21 +64,30 @@ class SystemTest {
     fun `player with same names are distinguished by ID`() {
         val p1 = gameManager.addPlayer("Анна")
         val p2 = gameManager.addPlayer("Анна")
+        val p3 = gameManager.addPlayer("Анна")
 
+        // ID должны быть разными
         assertNotEquals(p1.id, p2.id)
+        assertNotEquals(p1.id, p3.id)
+        assertNotEquals(p2.id, p3.id)
+
+        // Имена одинаковые
         assertEquals("Анна", p1.name)
         assertEquals("Анна", p2.name)
+        assertEquals("Анна", p3.name)
 
+        // Можно создать игру между игроками с одинаковыми именами
         val game = gameManager.createGame(p1.id, p2.id)
         assertNotNull(game)
         assertEquals(p1.id, game?.player1?.id)
         assertEquals(p2.id, game?.player2?.id)
 
-        // Проверяем, что в списке оба игрока
+        // В списке все три игрока
         val players = gameManager.getAllPlayers()
-        assertEquals(2, players.size)
+        assertEquals(3, players.size)
         assertTrue(players.any { it.id == p1.id && it.name == "Анна" })
         assertTrue(players.any { it.id == p2.id && it.name == "Анна" })
+        assertTrue(players.any { it.id == p3.id && it.name == "Анна" })
     }
 
     @Test
@@ -202,6 +215,7 @@ class SystemTest {
         val players = listOf("Анна", "Борис", "Светлана", "Дмитрий", "Елена")
         val playerObjects = players.map { gameManager.addPlayer(it) }
 
+        // Проверяем, что добавилось 5 игроков
         assertEquals(5, gameManager.getAllPlayers().size)
 
         // Создаём игру между 1 и 3 игроком
