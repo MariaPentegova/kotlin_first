@@ -1,10 +1,8 @@
 package gui
 
 import models.Player
-import service.BattleService
-import service.BoardFactory
-import service.BoardValidator
-import service.GameManager
+import service.*
+import database.DatabaseManager
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
@@ -12,7 +10,8 @@ import java.awt.Font
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 
-class MainFrame : JFrame("Морской Бой") {
+class MainFrame(private val dbManager: DatabaseManager) : JFrame("Морской Бой") {
+
     companion object {
         private const val PANEL_MAIN = "main"
         private const val PANEL_GAME = "game"
@@ -21,17 +20,15 @@ class MainFrame : JFrame("Морской Бой") {
     private val validator = BoardValidator()
     private val battleService = BattleService(validator)
     private val boardFactory = BoardFactory()
-    private val gameManager = GameManager(validator, battleService, boardFactory)
+    private val gameManager = GameManager(validator, battleService, boardFactory, dbManager)
 
     private val cardLayout = CardLayout()
     private val mainPanel = JPanel(cardLayout)
 
-    // Панели
     private val playersPanel = PlayersPanel(gameManager) { refreshPlayersList() }
     private val statsPanel = StatsPanel(gameManager)
     private var gameBoardPanel: GameBoardPanel? = null
 
-    // Таймер
     private var gameTimer: Timer? = null
     private var startTime: Long = 0
     private val timerLabel = JLabel("Время: 0 сек")
@@ -71,14 +68,13 @@ class MainFrame : JFrame("Морской Бой") {
         val exitItem = JMenuItem("Выход")
         exitItem.addActionListener {
             dispose()
-            kotlin.system.exitProcess(0)
+            System.exit(0)
         }
 
         gameMenu.add(newGameItem)
         gameMenu.addSeparator()
         gameMenu.add(exitItem)
 
-        // Добавляем подсказку
         val helpMenu = JMenu("Помощь")
         val hintItem = JMenuItem("Как играть")
         hintItem.addActionListener {
@@ -110,7 +106,6 @@ class MainFrame : JFrame("Морской Бой") {
     }
 
     private fun setupMainPanel() {
-        // Левая панель - список игроков и статистика
         val leftPanel = JPanel(BorderLayout())
         leftPanel.preferredSize = Dimension(300, 0)
         leftPanel.border = EmptyBorder(10, 10, 10, 10)
@@ -119,13 +114,12 @@ class MainFrame : JFrame("Морской Бой") {
         playersScrollPane.border = BorderFactory.createTitledBorder("Игроки")
 
         val statsScrollPane = JScrollPane(statsPanel)
-        statsScrollPane.border = BorderFactory.createTitledBorder("Статистика")
-        statsScrollPane.preferredSize = Dimension(280, 300)
+        statsScrollPane.border = BorderFactory.createTitledBorder("База данных (SQLite)")
+        statsScrollPane.preferredSize = Dimension(280, 400)
 
         leftPanel.add(playersScrollPane, BorderLayout.CENTER)
         leftPanel.add(statsScrollPane, BorderLayout.SOUTH)
 
-        // Центральная панель - игровое поле
         val centerPanel = JPanel(BorderLayout())
         centerPanel.border = EmptyBorder(10, 10, 10, 10)
 
@@ -138,13 +132,12 @@ class MainFrame : JFrame("Морской Бой") {
 
         centerPanel.add(topBar, BorderLayout.NORTH)
 
-        // Временная заглушка для игрового поля
         val tempPanel = JPanel()
         tempPanel.add(JLabel("Нажмите 'Новая игра' для начала"))
         centerPanel.add(tempPanel, BorderLayout.CENTER)
 
-        mainPanel.add(leftPanel, "main")
-        mainPanel.add(centerPanel, "main")
+        mainPanel.add(leftPanel, PANEL_MAIN)
+        mainPanel.add(centerPanel, PANEL_MAIN)
 
         add(mainPanel, BorderLayout.CENTER)
     }
@@ -187,7 +180,6 @@ class MainFrame : JFrame("Морской Бой") {
         val newGamePanel = GameBoardPanel(gameManager, game, this::onGameEnd, this::updateStats)
         gameBoardPanel = newGamePanel
 
-        // Просто добавляем и показываем
         mainPanel.add(newGamePanel, PANEL_GAME)
         cardLayout.show(mainPanel, PANEL_GAME)
 
@@ -303,4 +295,3 @@ class MainFrame : JFrame("Морской Бой") {
             JOptionPane.INFORMATION_MESSAGE
         )
     }
-}
