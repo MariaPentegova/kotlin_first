@@ -4,6 +4,7 @@ import models.GameState
 import models.MoveResult
 import models.Player
 import service.GameManager
+import service.BoardFactory
 import java.awt.Color
 import java.awt.Dimension
 import java.awt.Font
@@ -19,11 +20,11 @@ class GameBoardPanel(
     private val onStatsUpdate: () -> Unit
 ) : JPanel() {
 
-    // Для игрока 1
+    private val boardFactory = BoardFactory()
+
     private val player1MyBoard = Array(10) { arrayOfNulls<JButton>(10) }
     private val player1EnemyBoard = Array(10) { arrayOfNulls<JButton>(10) }
 
-    // Для игрока 2
     private val player2MyBoard = Array(10) { arrayOfNulls<JButton>(10) }
     private val player2EnemyBoard = Array(10) { arrayOfNulls<JButton>(10) }
 
@@ -41,7 +42,6 @@ class GameBoardPanel(
         gbc.fill = GridBagConstraints.HORIZONTAL
         add(infoPanel, gbc)
 
-        // Игрок 1 (доска противника СВЕРХУ, свои корабли СНИЗУ)
         val player1Panel = createPlayerPanel(gameState.player1, gameState.player2, player1MyBoard, player1EnemyBoard)
         gbc.gridx = 0
         gbc.gridy = 1
@@ -51,7 +51,6 @@ class GameBoardPanel(
         gbc.fill = GridBagConstraints.BOTH
         add(player1Panel, gbc)
 
-        // Игрок 2 (доска противника СВЕРХУ, свои корабли СНИЗУ)
         val player2Panel = createPlayerPanel(gameState.player2, gameState.player1, player2MyBoard, player2EnemyBoard)
         gbc.gridx = 1
         gbc.gridy = 1
@@ -72,7 +71,6 @@ class GameBoardPanel(
 
         val gbc = GridBagConstraints()
 
-        // Доска противника - СВЕРХУ
         val enemyBoardPanel = createBoardPanel("Доска противника: ${opponent.name}", enemyBoardButtons, isMyBoard = false)
         gbc.gridx = 0
         gbc.gridy = 0
@@ -80,7 +78,6 @@ class GameBoardPanel(
         gbc.fill = GridBagConstraints.BOTH
         panel.add(enemyBoardPanel, gbc)
 
-        // Свои корабли - СНИЗУ
         val myBoardPanel = createBoardPanel("Мои корабли", myBoardButtons, isMyBoard = true)
         gbc.gridx = 0
         gbc.gridy = 1
@@ -99,7 +96,6 @@ class GameBoardPanel(
 
         val gbc = GridBagConstraints()
 
-        // Заголовки колонок
         gbc.gridx = 1
         gbc.gridy = 0
         for (col in 0..9) {
@@ -109,7 +105,6 @@ class GameBoardPanel(
             gbc.gridx++
         }
 
-        // Кнопки и заголовки строк
         for (row in 0..9) {
             gbc.gridx = 0
             gbc.gridy = row + 1
@@ -138,7 +133,6 @@ class GameBoardPanel(
         return panel
     }
 
-    // Сигнатура makeMove НЕ МЕНЯЕТСЯ
     private fun makeMove(row: Int, col: Int) {
         val currentPlayer = gameState.currentPlayer
 
@@ -156,7 +150,7 @@ class GameBoardPanel(
                 onStatsUpdate()
             }
             MoveResult.KILL -> {
-                statusLabel.text = "ПОПАДАНИЕ! КОРАБЛЬ ПОТОПЛЕН! ${currentPlayer.name}(${currentPlayer.id}) стреляет ещё раз!"
+                statusLabel.text = "ПОПАДАНИЕ! КОРАБЛЬ ПОТОПЛЕН! ${currentPlayer.name} стреляет ещё раз!"
                 updateAllBoards()
                 onStatsUpdate()
                 if (gameState.winner != null) {
@@ -164,7 +158,7 @@ class GameBoardPanel(
                 }
             }
             MoveResult.MISS -> {
-                statusLabel.text = "ПРОМАХ! Ход переходит к ${gameState.getOpponent(currentPlayer).name}(${gameState.getOpponent(currentPlayer).id})"
+                statusLabel.text = "ПРОМАХ! Ход переходит к ${gameState.getOpponent(currentPlayer).name}"
                 updateAllBoards()
                 updateTurnInfo()
                 onStatsUpdate()
@@ -176,7 +170,7 @@ class GameBoardPanel(
                 statusLabel.text = "Неверный ход!"
             }
             MoveResult.GAME_WON -> {
-                statusLabel.text = "ПОБЕДА! ${currentPlayer.name}(${currentPlayer.id}) выиграл!"
+                statusLabel.text = "ПОБЕДА! ${currentPlayer.name} выиграл!"
                 updateAllBoards()
                 onStatsUpdate()
                 if (gameState.winner != null) {
@@ -193,11 +187,9 @@ class GameBoardPanel(
     }
 
     private fun updateAllBoards() {
-        // Для игрока 1
         updateBoardDisplay(gameState.board1, player1MyBoard, isMyBoard = true, forPlayer = gameState.player1)
         updateBoardDisplay(gameState.board2, player1EnemyBoard, isMyBoard = false, forPlayer = gameState.player1)
 
-        // Для игрока 2
         updateBoardDisplay(gameState.board2, player2MyBoard, isMyBoard = true, forPlayer = gameState.player2)
         updateBoardDisplay(gameState.board1, player2EnemyBoard, isMyBoard = false, forPlayer = gameState.player2)
     }
@@ -223,12 +215,11 @@ class GameBoardPanel(
                         } else {
                             button.text = ""
                             button.background = null
-                            // По доске противника можно стрелять ТОЛЬКО если ходит этот игрок
                             button.isEnabled = (gameState.currentPlayer.id == forPlayer.id) && gameState.winner == null
                         }
                     }
                     'X' -> {
-                        button.text = "💥"
+                        button.text = "!"
                         button.foreground = Color.WHITE
                         button.background = Color.RED
                         button.isEnabled = false
@@ -242,7 +233,6 @@ class GameBoardPanel(
                     else -> {
                         button.text = ""
                         button.background = null
-                        // По пустой клетке доски противника можно стрелять ТОЛЬКО если ходит этот игрок
                         button.isEnabled = !isMyBoard && (gameState.currentPlayer.id == forPlayer.id) && gameState.winner == null
                     }
                 }
@@ -269,7 +259,7 @@ class GameBoardPanel(
 
     private fun updateTurnInfo() {
         if (gameState.winner != null) {
-            currentPlayerLabel.text = "ИГРА ОКОНЧЕНА! Победитель: ${gameState.winner!!.name}"
+            currentPlayerLabel.text = "ИГРА ОКОНЧЕНА! Победитель: ${gameState.winner!!.name} (ID: ${gameState.winner!!.id})"
             currentPlayerLabel.foreground = Color.GREEN
         } else {
             currentPlayerLabel.text = "ХОДИТ: ${gameState.currentPlayer.name} (ID: ${gameState.currentPlayer.id})"
