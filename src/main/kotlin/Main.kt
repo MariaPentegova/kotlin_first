@@ -1,10 +1,14 @@
+import database.DatabaseManager
 import gui.MainFrame
 import service.*
-import ui.ConsoleUI
+import ui.console.ConsoleUI
 import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
 
 fun main() {
+    val dbManager = DatabaseManager()
+    dbManager.initialize()
+
     val choice = JOptionPane.showOptionDialog(
         null,
         "Выберите режим запуска:",
@@ -12,30 +16,25 @@ fun main() {
         JOptionPane.YES_NO_OPTION,
         JOptionPane.QUESTION_MESSAGE,
         null,
-        arrayOf("GUI", "Консоль"),
-        "GUI"
+        arrayOf("GUI (Swing)", "Консоль"),
+        "GUI (Swing)"
     )
 
     when (choice) {
         0 -> {
-            // GUI режим
             SwingUtilities.invokeLater {
-                val frame = MainFrame()
+                val frame = MainFrame(dbManager)
                 frame.isVisible = true
             }
         }
         1 -> {
-            // Консольный режим - создаём зависимости
             val validator = BoardValidator()
             val battleService = BattleService(validator)
             val boardFactory = BoardFactory()
-            val registry = PlayerRegistry()  // для сохранения игроков
-            val gameManager = GameManager(validator, battleService, boardFactory, registry)
+            val gameManager = GameManager(validator, battleService, boardFactory, dbManager)
             val consoleUI = ConsoleUI(gameManager, boardFactory)
             consoleUI.start()
         }
-        else -> {
-            println("Выход")
-        }
+        else -> println("Выход")
     }
 }
