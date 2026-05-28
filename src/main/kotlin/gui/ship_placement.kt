@@ -19,7 +19,7 @@ class ShipPlacementDialog(
     private val gameManager: GameManager,
     private val player: Player,
     private val fleet: List<Int>,
-    private val onCancel: () -> Unit  // ← колбэк при отмене/закрытии
+    private val onCancel: () -> Unit
 ) : JDialog(parent, "Расстановка кораблей - ${player.name}", true) {
 
     private val boardButtons = Array(10) { arrayOfNulls<JButton>(10) }
@@ -36,7 +36,6 @@ class ShipPlacementDialog(
         setLocationRelativeTo(parent)
         layout = BorderLayout()
 
-        // Обработчик закрытия окна (крестик)
         addWindowListener(object : WindowAdapter() {
             override fun windowClosing(e: WindowEvent) {
                 val confirm = JOptionPane.showConfirmDialog(
