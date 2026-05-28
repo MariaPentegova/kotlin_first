@@ -20,29 +20,21 @@ class BoardValidator {
         }
 
         val cells = getShipCells(startRow, startCol, length, direction)
-
-        // Проверка границ
         if (cells.isEmpty()) return ShipPlacementResult.OUT_OF_BOUNDS
 
-        // Проверка занятости клеток
         for ((r, c) in cells) {
+            if (!isInBounds(r, c)) return ShipPlacementResult.OUT_OF_BOUNDS
             if (board[r][c] != '~') return ShipPlacementResult.OVERLAP
         }
 
-        // Проверка всех соседей для всех клеток корабля
         for ((r, c) in cells) {
-            // Проверяем все клетки вокруг (включая диагонали)
             for (dr in -1..1) {
                 for (dc in -1..1) {
                     if (dr == 0 && dc == 0) continue
                     val nr = r + dr
                     val nc = c + dc
-                    if (isInBounds(nr, nc)) {
-                        // Если соседняя клетка не является частью нашего нового корабля
-                        // и в ней есть корабль, то нельзя ставить
-                        if ((nr to nc) !in cells && board[nr][nc] != '~') {
-                            return ShipPlacementResult.TOO_CLOSE
-                        }
+                    if (isInBounds(nr, nc) && board[nr][nc] != '~' && (nr to nc) !in cells) {
+                        return ShipPlacementResult.TOO_CLOSE
                     }
                 }
             }
