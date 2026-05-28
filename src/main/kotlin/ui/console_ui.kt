@@ -1,7 +1,8 @@
-package ui
+package ui.console
 
 import models.*
-import service.*
+import service.GameManager
+import service.BoardFactory
 
 class ConsoleUI(
     private val gameManager: GameManager,
@@ -18,7 +19,9 @@ class ConsoleUI(
                 "2" -> showPlayers()
                 "3" -> startNewGame()
                 "4" -> showCurrentGameStats()
-                "5" -> {
+                "5" -> gameManager.printGameHistory()
+                "6" -> gameManager.printPlayerStats()
+                "7" -> {
                     println("До свидания!")
                     return
                 }
@@ -28,12 +31,14 @@ class ConsoleUI(
     }
 
     private fun showMainMenu() {
-        println(" ГЛАВНОЕ МЕНЮ")
-        println(" 1. Добавить игрока                 ")
-        println(" 2. Показать всех игроков           ")
-        println(" 3. Начать новую игру               ")
+        println("\n ГЛАВНОЕ МЕНЮ")
+        println(" 1. Добавить игрока")
+        println(" 2. Показать всех игроков")
+        println(" 3. Начать новую игру")
         println(" 4. Показать статистику текущей игры")
-        println(" 5. Выход                           ")
+        println(" 5. История игр (БД)")
+        println(" 6. Статистика игроков (БД)")
+        println(" 7. Выход")
         print("Выберите действие: ")
     }
 
@@ -48,13 +53,11 @@ class ConsoleUI(
 
         val existing = gameManager.getAllPlayers().find { it.name.equals(name, ignoreCase = true) }
         if (existing != null) {
-            println("Игрок с именем '${existing.name}' уже существует")
+            println("Игрок с именем '${existing.name}' уже существует (ID: ${existing.id})")
             print("Добавить всё равно? (y/n): ")
             val answer = readLine()?.lowercase()
             when (answer) {
-                "y", "yes", "да" -> {
-                    println("Добавление игрока с повторяющимся именем")
-                }
+                "y", "yes", "да" -> println("Добавляем игрока с повторяющимся именем")
                 "n", "no", "нет" -> {
                     println("Добавление отменено")
                     return
@@ -77,7 +80,7 @@ class ConsoleUI(
             return
         }
 
-        println("         СПИСОК ИГРОКОВ            ")
+        println("\n         СПИСОК ИГРОКОВ")
         players.forEach { player ->
             println(" ID: ${player.id} → ${player.name}")
         }
@@ -101,7 +104,7 @@ class ConsoleUI(
             }
         }
 
-        println("         ВЫБОР ИГРОКОВ")
+        println("\n         ВЫБОР ИГРОКОВ")
 
         val p1 = selectPlayer(players, "первого") ?: return
         val p2 = selectPlayer(players.filter { it.id != p1.id }, "второго") ?: return
@@ -123,17 +126,14 @@ class ConsoleUI(
     private fun setupFleetWithPlayerSwitch(player1: Player, player2: Player) {
         val fleet = listOf(4, 3, 3, 2, 2, 2, 1, 1, 1, 1)
 
-        // Расстановка для первого игрока
         println("\n Первый игрок. Расстановка кораблей для: (ID: ${player1.id}, ${player1.name})")
         println("(Пожалуйста, передайте устройство этому игроку)")
         waitForEnter("Нажмите Enter, когда игрок готов...")
 
         setupFleetForPlayer(player1, gameManager.getCurrentGame()!!.board1, fleet)
 
-        // Очистка экрана (имитация)
         repeat(50) { println() }
 
-        // Расстановка для второго игрока
         println("\nВторой игрок. Расстановка кораблей для: (ID: ${player2.id}, ${player2.name})")
         println("(Передача устройства этому игроку)")
         waitForEnter("Нажмите Enter, когда игрок готов...")
@@ -141,7 +141,7 @@ class ConsoleUI(
         setupFleetForPlayer(player2, gameManager.getCurrentGame()!!.board2, fleet)
 
         repeat(50) { println() }
-        println("\n Оба игрока расставили корабли! ")
+        println("\n Оба игрока расставили корабли!")
     }
 
     private fun setupFleetForPlayer(player: Player, board: Array<Array<Char>>, fleet: List<Int>) {
@@ -177,7 +177,7 @@ class ConsoleUI(
     }
 
     private fun playBattle(game: GameState) {
-        println("          НАЧАЛО БИТВЫ!")
+        println("\n          НАЧАЛО БИТВЫ!")
         println("(ID: ${game.player1.id}, ${game.player1.name}) vs (ID: ${game.player2.id}, ${game.player2.name})")
         println("\n Команды во время игры:")
         println(" 'stats' - показать статистику")
@@ -185,7 +185,7 @@ class ConsoleUI(
         println(" 'help'  - показать это сообщение")
 
         while (game.winner == null) {
-            println(" ХОД ИГРОКА: (ID: ${game.currentPlayer.id}, ${game.currentPlayer.name})")
+            println("\n ХОД ИГРОКА: (ID: ${game.currentPlayer.id}, ${game.currentPlayer.name})")
 
             val opponent = game.getOpponent(game.currentPlayer)
             val hiddenBoard = boardFactory.getHiddenBoard(game.getBoard(opponent))
@@ -242,7 +242,6 @@ class ConsoleUI(
                     }
                     MoveResult.GAME_WON -> {
                         println("\nПОБЕДА!")
-                        println("Игрок (ID: ${game.currentPlayer.id}, ${game.currentPlayer.name}) выиграл!")
                         game.winner = game.currentPlayer
                         validMove = true
                     }
@@ -261,7 +260,7 @@ class ConsoleUI(
             }
         }
 
-        println("\nИГРА ЗАВЕРШЕНА!")
+        println("\nИГРА ЗАВЕРШЕНА! Победитель: (ID: ${game.winner!!.id}, ${game.winner!!.name})")
         waitForEnter("Нажмите Enter для возврата в главное меню...")
     }
 
@@ -273,7 +272,7 @@ class ConsoleUI(
         }
 
         val stats = gameManager.getGameStats()
-        println("         СТАТИСТИКА ИГРЫ")
+        println("\n         СТАТИСТИКА ИГРЫ")
         println(" ${stats.player1Name} (ID: ${stats.player1Id})")
         println("Кораблей: ${stats.player1Ships} | Попаданий: ${stats.player1Hits}")
         println(" ${stats.player2Name} (ID: ${stats.player2Id})")
