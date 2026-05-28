@@ -44,9 +44,7 @@ class BattleService(private val validator: BoardValidator) {
         var count = 0
         for (row in board) {
             for (cell in row) {
-                if (cell == 'X') {
-                    count++
-                }
+                if (cell == 'X') count++
             }
         }
         return count
