@@ -57,33 +57,23 @@ class PlayersPanel(
             JOptionPane.QUESTION_MESSAGE
         )
 
-        // Проверка на null (отмена) и пустую строку
-        if (name.isNullOrBlank()) {
-            JOptionPane.showMessageDialog(
-                this,
-                "Имя не может быть пустым!",
-                "Ошибка",
-                JOptionPane.WARNING_MESSAGE
-            )
-            return
-        }
+        if (!name.isNullOrBlank()) {
+            val trimmedName = name.trim()
+            val existing = gameManager.getAllPlayers().find { it.name.equals(trimmedName, ignoreCase = true) }
+            if (existing != null) {
+                val confirm = JOptionPane.showConfirmDialog(
+                    this,
+                    "Игрок с именем '${existing.name}' уже существует (ID: ${existing.id}).\nДобавить всё равно?",
+                    "Подтверждение",
+                    JOptionPane.YES_NO_OPTION
+                )
+                if (confirm != JOptionPane.YES_OPTION) return
+            }
 
-        // Проверка на существующего игрока (опционально)
-        val trimmedName = name.trim()
-        val existing = gameManager.getAllPlayers().find { it.name.equals(trimmedName, ignoreCase = true) }
-        if (existing != null) {
-            val confirm = JOptionPane.showConfirmDialog(
-                this,
-                "Игрок с именем '${existing.name}' уже существует (ID: ${existing.id}).\nДобавить всё равно?",
-                "Подтверждение",
-                JOptionPane.YES_NO_OPTION
-            )
-            if (confirm != JOptionPane.YES_OPTION) return
+            gameManager.addPlayer(trimmedName)
+            refresh()
+            onPlayersChanged()
         }
-
-        gameManager.addPlayer(trimmedName)
-        refresh()
-        onPlayersChanged()
     }
 
     private fun deleteSelectedPlayer() {
@@ -98,8 +88,6 @@ class PlayersPanel(
             )
 
             if (confirm == JOptionPane.YES_OPTION) {
-                // В текущей реализации GameManager не имеет deletePlayer
-                // добавим позже или просто обновим список
                 JOptionPane.showMessageDialog(
                     this,
                     "Удаление игроков пока не реализовано",
