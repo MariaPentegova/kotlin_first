@@ -1,27 +1,40 @@
-ackage service
+package service
 
 import models.*
+import database.DatabaseManager
+import java.util.UUID
 
 class GameManager(
     private val validator: BoardValidator,
     private val battleService: BattleService,
     private val boardFactory: BoardFactory,
-    private val registry: PlayerRegistry = PlayerRegistry()// Здесь всё правильно
-)  {
+    private val dbManager: DatabaseManager
+) {
     private var nextPlayerId = 1
     private val players = mutableMapOf<Int, Player>()
     private var currentGame: GameState? = null
+    private var currentGameId: String? = null
+    private val currentMoves = mutableListOf<GameMove>()
+    private var gameStartTime: Long = 0
 
     init {
-        // Загружаем игроков из реестра при старте
-        registry.getAll().forEach { players[it.id] = it }
-        nextPlayerId = (players.keys.maxOrNull() ?: 0) + 1
+        dbManager.initialize()
+        loadPlayersFromDb()
+    }
+
+    private fun loadPlayersFromDb() {
+        val playersFromDb = dbManager.getAllPlayers()
+        for ((id, name) in playersFromDb) {
+            val player = Player(id, name)
+            players[id] = player
+            if (id >= nextPlayerId) nextPlayerId = id + 1
+        }
     }
 
     fun addPlayer(name: String): Player {
         val player = Player(nextPlayerId, name.trim())
         players[nextPlayerId] = player
-        registry.save(player)  // ← сохраняем в реестр
+        dbManager.savePlayer(nextPlayerId, player.name)
         nextPlayerId++
         return player
     }
@@ -33,30 +46,40 @@ class GameManager(
     fun createGame(player1Id: Int, player2Id: Int): GameState? {
         val p1 = players[player1Id]
         val p2 = players[player2Id]
-
         if (p1 == null || p2 == null || p1.id == p2.id) return null
 
-        currentGame = GameState(
-            player1 = p1,
-            player2 = p2,
-            board1 = boardFactory.createEmptyBoard(),
-            board2 = boardFactory.createEmptyBoard(),
-            currentPlayer = p1
-        )
+        currentGameId = UUID.randomUUID().toString()
+        currentGame = GameState(p1, p2, boardFactory.createEmptyBoard(), boardFactory.createEmptyBoard(), p1)
+        currentMoves.clear()
+        gameStartTime = System.currentTimeMillis()
+
         return currentGame
     }
 
     fun finishGame() {
+        currentGame?.let { game ->
+            if (game.winner != null) {
+                dbManager.saveGame(
+                    gameId = currentGameId!!,
+                    player1Id = game.player1.id,
+                    player2Id = game.player2.id,
+                    winnerId = game.winner?.id,
+                    startTime = gameStartTime,
+                    endTime = System.currentTimeMillis(),
+                    moves = currentMoves.toList()
+                )
+                println("   Игра сохранена в БД!")
+                println("   ID игры: ${currentGameId}")
+                println("   Победитель: ${game.winner?.name}")
+                println("   Всего ходов: ${currentMoves.size}")
+            }
+        }
         currentGame = null
+        currentGameId = null
+        currentMoves.clear()
     }
 
-    fun placeShip(
-        playerId: Int,
-        startRow: Int,
-        startCol: Int,
-        length: Int,
-        direction: String
-    ): ShipPlacementResult {
+    fun placeShip(playerId: Int, startRow: Int, startCol: Int, length: Int, direction: String): ShipPlacementResult {
         val game = currentGame ?: return ShipPlacementResult.OUT_OF_BOUNDS
         val player = getPlayerById(playerId) ?: return ShipPlacementResult.OUT_OF_BOUNDS
         val board = game.getBoard(player)
@@ -70,12 +93,9 @@ class GameManager(
 
     fun makeMove(playerId: Int, row: Int, col: Int): MoveResult {
         val game = currentGame ?: return MoveResult.INVALID
-
-        // НОВАЯ ПРОВЕРКА - не ломает существующие тесты
         if (row !in 0 until BoardValidator.SIZE || col !in 0 until BoardValidator.SIZE) {
             return MoveResult.INVALID
         }
-
         if (game.winner != null) return MoveResult.INVALID
         if (game.currentPlayer.id != playerId) return MoveResult.INVALID
 
@@ -87,44 +107,143 @@ class GameManager(
 
         val result = battleService.makeMove(opponentBoard, row, col)
 
+        val isKill = (result == MoveResult.KILL)
+        val isHit = (result == MoveResult.HIT || result == MoveResult.KILL)
+
+        currentMoves.add(GameMove(
+            playerId = playerId,
+            row = row,
+            col = col,
+            isHit = isHit,
+            isKill = isKill,
+            moveNumber = currentMoves.size + 1,
+            timestamp = System.currentTimeMillis()
+        ))
+
         when (result) {
             MoveResult.HIT, MoveResult.KILL -> {
                 if (battleService.isGameOver(opponentBoard)) {
                     game.winner = game.currentPlayer
+                    finishGame()
                 }
             }
             MoveResult.MISS -> game.switchTurn()
             else -> return result
         }
-
         return result
     }
 
     fun getGameStats(): GameStats {
         val game = currentGame ?: return GameStats.empty()
-
-        // player1Hits - попадания игрока 1 (на доске игрока 2)
-        // player2Hits - попадания игрока 2 (на доске игрока 1)
         return GameStats(
             player1Id = game.player1.id,
             player1Name = game.player1.name,
-            player1Ships = battleService.getRemainingShipsCount(game.board1),  // корабли игрока 1
-            player1Hits = battleService.getHitCount(game.board2),  // ← попадания игрока 1 на доске игрока 2
+            player1Ships = battleService.getRemainingShipsCount(game.board1),
+            player1Hits = battleService.getHitCount(game.board2),
             player2Id = game.player2.id,
             player2Name = game.player2.name,
-            player2Ships = battleService.getRemainingShipsCount(game.board2),  // корабли игрока 2
-            player2Hits = battleService.getHitCount(game.board1),  // ← попадания игрока 2 на доске игрока 1
+            player2Ships = battleService.getRemainingShipsCount(game.board2),
+            player2Hits = battleService.getHitCount(game.board1),
             currentPlayerId = game.currentPlayer.id,
             currentPlayerName = game.currentPlayer.name
         )
+    }
+
+    // ========== МЕТОДЫ ДЛЯ ПРОСМОТРА ИСТОРИИ И СТАТИСТИКИ ==========
+
+    fun getAllGamesFromDb(): List<StoredGame> = dbManager.getAllGames()
+
+    fun getGamesByPlayerFromDb(playerId: Int): List<StoredGame> = dbManager.getGamesByPlayer(playerId)
+
+    fun getAllPlayerStatsFromDb(): List<PlayerStatsRecord> = dbManager.getAllPlayerStatistics()
+
+    fun getPlayerStatsFromDb(playerId: Int): PlayerStatsRecord? = dbManager.getPlayerStatistics(playerId)
+
+    fun printGameHistory() {
+        val games = getAllGamesFromDb()
+        if (games.isEmpty()) {
+            println("История игр пуста")
+            return
+        }
+
+        println("\n╔══════════════════════════════════════════════════════════════════════════════╗")
+        println("║                              ИСТОРИЯ ИГР                                      ║")
+        println("╠══════════════════════════════════════════════════════════════════════════════╣")
+
+        games.forEachIndexed { index, game ->
+            val player1 = getPlayerById(game.player1Id)?.name ?: "?"
+            val player2 = getPlayerById(game.player2Id)?.name ?: "?"
+            val winner = game.winnerId?.let { getPlayerById(it)?.name } ?: "?"
+            val date = java.util.Date(game.startTime)
+
+            println("\n Игра #${index + 1}")
+            println("   ID: ${game.id.take(8)}...")
+            println("   Игроки: $player1 vs $player2")
+            println("   Победитель: $winner")
+            println("   Дата: $date")
+            println("   Всего ходов: ${game.moves.size}")
+            println("   Длительность: ${(game.endTime?.minus(game.startTime) ?: 0) / 1000} сек")
+
+            if (game.moves.isNotEmpty()) {
+                println("   📋 Подробная таблица ходов:")
+                println("   ┌─────┬───────────┬─────┬─────┬────────┬─────────┐")
+                println("   │ №   │ Игрок     │ Ряд │ Кол │ Попал  │ Потопил │")
+                println("   ├─────┼───────────┼─────┼─────┼────────┼─────────┤")
+                game.moves.forEach { move ->
+                    val player = getPlayerById(move.playerId)?.name?.take(9) ?: "?"
+                    println("   │ ${move.moveNumber.toString().padStart(3)} │ ${player.padEnd(9)} │ ${move.row.toString().padStart(3)} │ ${move.col.toString().padStart(3)} │ ${if (move.isHit) "   Да   " else "   Нет  "} │ ${if (move.isKill) "   Да   " else "   Нет  "} │")
+                }
+                println("   └─────┴───────────┴─────┴─────┴────────┴─────────┘")
+            }
+            println("   ─────────────────────────────────────────────────────────────────────────")
+        }
+
+        println("\n╚══════════════════════════════════════════════════════════════════════════════╝")
+        println("Всего игр в БД: ${games.size}")
+    }
+
+    fun printPlayerStats() {
+        val stats = getAllPlayerStatsFromDb()
+        if (stats.isEmpty()) {
+            println("\n Статистика пуста. Сыграйте несколько игр!")
+            return
+        }
+
+        println("\n╔══════════════════════════════════════════════════════════════════════════════╗")
+        println("║                         СТАТИСТИКА ИГРОКОВ                                    ║")
+        println("╠══════════════════════════════════════════════════════════════════════════════╣")
+        println("║ ID │ Игрок            │ Игр │ Побед │ % побед │ Попаданий │ Кораблей │ Рейтинг║")
+        println("╠══════════════════════════════════════════════════════════════════════════════╣")
+
+        stats.sortedByDescending { it.gamesWon }.forEachIndexed { index, stat ->
+            val medal = when (index) {
+                0 -> "🥇"
+                1 -> "🥈"
+                2 -> "🥉"
+                else -> "  "
+            }
+            println("║ ${medal} ${stat.playerId.toString().padStart(2)} │ ${stat.playerName.padEnd(16)} │ " +
+                    "${stat.gamesPlayed.toString().padStart(3)} │ ${stat.gamesWon.toString().padStart(5)} │ " +
+                    "${(stat.winRate * 100).toInt().toString().padStart(6)}% │ ${stat.totalHits.toString().padStart(9)} │ " +
+                    "${stat.shipsSunk.toString().padStart(8)} │ ${((stat.winRate * 100).toInt()).toString().padStart(6)} ║")
+        }
+        println("╚══════════════════════════════════════════════════════════════════════════════╝")
+
+        val totalGames = stats.sumOf { it.gamesPlayed } / 2
+        val totalHits = stats.sumOf { it.totalHits }
+        val totalShips = stats.sumOf { it.shipsSunk }
+
+        println("\n ОБЩАЯ СТАТИСТИКА:")
+        println("   Всего сыграно партий: $totalGames")
+        println("   Всего попаданий: $totalHits")
+        println("   Всего потоплено кораблей: $totalShips")
+        println("   Всего игроков: ${stats.size}")
     }
 
     fun isFleetReady(playerId: Int): Boolean {
         val game = currentGame ?: return false
         val player = getPlayerById(playerId) ?: return false
         val board = game.getBoard(player)
-        val expectedTotalCells = 20 // 4+3+3+2+2+2+1+1+1+1
-        val actualCells = battleService.getRemainingShipsCount(board)
-        return actualCells == expectedTotalCells
+        return battleService.getRemainingShipsCount(board) == 20
     }
 }
