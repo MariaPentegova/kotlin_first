@@ -1,5 +1,22 @@
 package models
 
+data class GameStats(
+    val player1Id: Int,
+    val player1Name: String,
+    val player1Ships: Int,
+    val player1Hits: Int,
+    val player2Id: Int,
+    val player2Name: String,
+    val player2Ships: Int,
+    val player2Hits: Int,
+    val currentPlayerId: Int,
+    val currentPlayerName: String
+) {
+    companion object {
+        fun empty() = GameStats(0, "", 0, 0, 0, "", 0, 0, 0, "")
+    }
+}
+
 data class GameState(
     val player1: Player,
     val player2: Player,
@@ -16,31 +33,5 @@ data class GameState(
 
     fun switchTurn() {
         currentPlayer = getOpponent(currentPlayer)
-    }
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as GameState
-
-        if (player1 != other.player1) return false
-        if (player2 != other.player2) return false
-        if (!board1.contentDeepEquals(other.board1)) return false
-        if (!board2.contentDeepEquals(other.board2)) return false
-        if (currentPlayer != other.currentPlayer) return false
-        if (winner != other.winner) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = player1.hashCode()
-        result = 31 * result + player2.hashCode()
-        result = 31 * result + board1.contentDeepHashCode()
-        result = 31 * result + board2.contentDeepHashCode()
-        result = 31 * result + currentPlayer.hashCode()
-        result = 31 * result + (winner?.hashCode() ?: 0)
-        return result
     }
 }
