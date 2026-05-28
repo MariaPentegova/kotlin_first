@@ -1,7 +1,7 @@
 package gui
 
+import models.PlayerStatsRecord
 import service.GameManager
-import service.PlayerStats
 import java.awt.BorderLayout
 import java.awt.Font
 import javax.swing.*
@@ -10,85 +10,129 @@ import javax.swing.table.DefaultTableModel
 
 class StatsPanel(private val gameManager: GameManager) : JPanel() {
 
-    private val tableModel = DefaultTableModel(
+    private val statsTableModel = DefaultTableModel(
         arrayOf("ID", "Игрок", "Игр", "Побед", "% побед", "Попаданий", "Кораблей"), 0
     )
-    private val statsTable = JTable(tableModel)
-    private val refreshButton = JButton("🔄 Обновить")
+    private val statsTable = JTable(statsTableModel)
+    private val refreshButton = JButton("🔄 Обновить статистику")
+
+    private val historyTableModel = DefaultTableModel(
+        arrayOf("ID игры", "Игрок 1", "Игрок 2", "Победитель", "Дата", "Ходов"), 0
+    )
+    private val historyTable = JTable(historyTableModel)
+    private val refreshHistoryButton = JButton("🔄 Обновить историю")
+
+    private val tabbedPane = JTabbedPane()
+
+    private val collapseButton = JButton("▼ Свернуть")
+    private val contentPanel = JPanel(BorderLayout())
+    private var isCollapsed = false
 
     init {
         layout = BorderLayout()
         border = EmptyBorder(5, 5, 5, 5)
 
+        setupCollapsiblePanel()
+        setupTables()
+        setupButtons()
+
+        refreshStats()
+        refreshHistory()
+    }
+
+    private fun setupCollapsiblePanel() {
+        val titlePanel = JPanel(BorderLayout())
+        val titleLabel = JLabel("📊 СТАТИСТИКА И ИСТОРИЯ", SwingConstants.CENTER)
+        titleLabel.font = Font("Arial", Font.BOLD, 14)
+
+        titlePanel.add(collapseButton, BorderLayout.WEST)
+        titlePanel.add(titleLabel, BorderLayout.CENTER)
+
+        collapseButton.addActionListener {
+            isCollapsed = !isCollapsed
+            contentPanel.isVisible = !isCollapsed
+            collapseButton.text = if (isCollapsed) "▶ Развернуть" else "▼ Свернуть"
+        }
+
+        add(titlePanel, BorderLayout.NORTH)
+        contentPanel.border = EmptyBorder(5, 0, 0, 0)
+        add(contentPanel, BorderLayout.CENTER)
+    }
+
+    private fun setupTables() {
         statsTable.font = Font("Monospaced", Font.PLAIN, 11)
         statsTable.rowHeight = 20
         statsTable.getTableHeader().reorderingAllowed = false
 
-        val scrollPane = JScrollPane(statsTable)
-        scrollPane.preferredSize = java.awt.Dimension(280, 300)
+        val statsScrollPane = JScrollPane(statsTable)
+        statsScrollPane.border = BorderFactory.createTitledBorder("📈 Статистика игроков")
+        statsScrollPane.preferredSize = java.awt.Dimension(280, 250)
 
-        refreshButton.addActionListener { refresh() }
+        historyTable.font = Font("Monospaced", Font.PLAIN, 11)
+        historyTable.rowHeight = 20
+        historyTable.getTableHeader().reorderingAllowed = false
 
-        add(scrollPane, BorderLayout.CENTER)
-        add(refreshButton, BorderLayout.SOUTH)
+        val historyScrollPane = JScrollPane(historyTable)
+        historyScrollPane.border = BorderFactory.createTitledBorder("📜 История партий")
+        historyScrollPane.preferredSize = java.awt.Dimension(280, 250)
 
-        refresh()
+        tabbedPane.addTab("Статистика", statsScrollPane)
+        tabbedPane.addTab("История игр", historyScrollPane)
+
+        contentPanel.add(tabbedPane, BorderLayout.CENTER)
     }
 
-    fun refresh() {
-        tableModel.setRowCount(0)
+    private fun setupButtons() {
+        val buttonPanel = JPanel()
+        buttonPanel.add(refreshButton)
+        buttonPanel.add(refreshHistoryButton)
 
-        val players = gameManager.getAllPlayers()
-        val allStats = mutableListOf<PlayerStats>()
+        refreshButton.addActionListener { refreshStats() }
+        refreshHistoryButton.addActionListener { refreshHistory() }
 
-        // Собираем статистику из GameManager (если есть)
-        players.forEach { player ->
-            val stats = calculateStats(player.id)
-            allStats.add(stats)
-        }
+        contentPanel.add(buttonPanel, BorderLayout.SOUTH)
+    }
 
-        // Сортируем по количеству побед
-        allStats.sortedByDescending { it.gamesWon }.forEach { stats ->
-            tableModel.addRow(arrayOf(
-                stats.playerId,
-                stats.playerName,
-                stats.gamesPlayed,
-                stats.gamesWon,
-                "${(stats.winRate * 100).toInt()}%",
-                stats.totalHits,
-                stats.shipsSunk
+    fun refreshStats() {
+        statsTableModel.setRowCount(0)
+        val stats = gameManager.getAllPlayerStatsFromDb()
+
+        stats.forEach { stat ->
+            statsTableModel.addRow(arrayOf(
+                stat.playerId,
+                stat.playerName,
+                stat.gamesPlayed,
+                stat.gamesWon,
+                "${(stat.winRate * 100).toInt()}%",
+                stat.totalHits,
+                stat.shipsSunk
             ))
         }
     }
 
-    private fun calculateStats(playerId: Int): PlayerStats {
-        val game = gameManager.getCurrentGame()
-        var gamesPlayed = 0
-        var gamesWon = 0
-        var totalHits = 0
-        var shipsSunk = 0
+    fun refreshHistory() {
+        historyTableModel.setRowCount(0)
+        val games = gameManager.getAllGamesFromDb()
 
-        // Если есть активная игра и игрок в ней участвует
-        if (game != null) {
-            if (game.player1.id == playerId || game.player2.id == playerId) {
-                val stats = gameManager.getGameStats()
-                if (playerId == stats.player1Id) {
-                    totalHits = stats.player1Hits
-                } else {
-                    totalHits = stats.player2Hits
-                }
-                gamesPlayed = 1
-            }
+        games.forEach { game ->
+            val player1 = gameManager.getPlayerById(game.player1Id)?.name ?: "?"
+            val player2 = gameManager.getPlayerById(game.player2Id)?.name ?: "?"
+            val winner = game.winnerId?.let { gameManager.getPlayerById(it)?.name } ?: "?"
+            val date = java.util.Date(game.startTime).toString().take(20)
+
+            historyTableModel.addRow(arrayOf(
+                game.id.take(8) + "...",
+                player1,
+                player2,
+                winner,
+                date,
+                game.moves.size
+            ))
         }
+    }
 
-        val player = gameManager.getPlayerById(playerId)
-        return PlayerStats(
-            playerId = playerId,
-            playerName = player?.name ?: "?",
-            gamesPlayed = gamesPlayed,
-            gamesWon = gamesWon,
-            totalHits = totalHits,
-            shipsSunk = shipsSunk
-        )
+    fun refresh() {
+        refreshStats()
+        refreshHistory()
     }
 }
